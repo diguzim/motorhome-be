@@ -1,0 +1,69 @@
+### Variables
+@baseUrl = http://localhost:1337
+@apiUrl = {{baseUrl}}/api
+
+### Get all trabalhos
+GET {{apiUrl}}/trabalhos
+Content-Type: application/json
+
+###
+
+### Get trabalhos with population (include relations)
+GET {{apiUrl}}/trabalhos?populate=*
+Content-Type: application/json
+
+###
+
+### Get single trabalho by ID
+GET {{apiUrl}}/trabalhos/htr7lui2y2sepa7xoyigtlv1
+Content-Type: application/json
+
+###
+
+### Get single trabalho with population
+GET {{apiUrl}}/trabalhos/htr7lui2y2sepa7xoyigtlv1?populate=*
+Content-Type: application/json
+
+###
+
+### Sorting example (descending by createdAt)
+GET {{apiUrl}}/trabalhos?sort=createdAt:desc
+Content-Type: application/json
+
+###
+
+### Get trabalho by slug
+GET {{apiUrl}}/trabalhos?filters[slug][$eq]=exemplo-de-trabalho
+Content-Type: application/json
+
+###
+
+### Admin endpoints (require authentication)
+### Login to admin (get JWT token)
+POST {{baseUrl}}/admin/auth/local
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "password123"
+}
+
+###
+
+### Use JWT token for authenticated requests
+# @name login
+# Use the token from the login response above
+@token = {{login.response.body.data.token}}
+
+### Get trabalhos with authentication
+GET {{apiUrl}}/trabalhos
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+###
+
+### Health check
+GET {{baseUrl}}/_health
+Content-Type: application/json
+
+###
