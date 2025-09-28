@@ -9,6 +9,7 @@ export default [
         "http://localhost:3000", // Local development
         "http://localhost:3001", // Alternative local port
         "https://motorhome-be.vercel.app", // Your Vercel deployment
+        "https://motorhome-h2fh4yje4-diguzims-projects.vercel.app",
         // Add other frontend domains as needed
       ],
       methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"],
