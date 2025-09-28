@@ -1,5 +1,10 @@
 export default [
-  "strapi::logger",
+  {
+    name: "strapi::logger",
+    config: {
+      level: process.env.STRAPI_LOG_LEVEL || 'info',
+    },
+  },
   "strapi::errors",
   {
     name: "strapi::security",
