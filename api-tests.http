@@ -1,6 +1,6 @@
 ### Variables
-@baseUrl = http://localhost:1337
-# @baseUrl = https://motorhome-be.onrender.com
+# @baseUrl = http://localhost:1337
+@baseUrl = https://motorhome-be.onrender.com
 @apiUrl = {{baseUrl}}/api
 
 ### Get all trabalhos
