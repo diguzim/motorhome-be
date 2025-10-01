@@ -1,0 +1,32 @@
+name: Local Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [feature/*, develop]
+
+jobs:
+  quick-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js and Dependencies
+        uses: ./.github/actions/setup-node-deps
+        with:
+          node-version: "20.x"
+
+      - name: Quick build test
+        run: npm run build
+        env:
+          NODE_ENV: development
+
+      - name: TypeScript check
+        run: npx tsc --noEmit
+
+      - name: Test summary
+        run: |
+          echo "✅ Quick test completed successfully!"
+          echo "📦 Build: OK"
+          echo "🔍 TypeScript: OK"

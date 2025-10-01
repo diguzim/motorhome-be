@@ -1,0 +1,32 @@
+name: Full CI Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    uses: ./.github/workflows/build.yml
+    with:
+      node-version: "20.x"
+      cache-artifacts: true
+      environment: "production"
+
+  quality:
+    uses: ./.github/workflows/quality.yml
+    needs: build
+    with:
+      node-version: "20.x"
+
+  multi-node-test:
+    if: github.event_name == 'pull_request'
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
+    uses: ./.github/workflows/build.yml
+    with:
+      node-version: ${{ matrix.node-version }}
+      cache-artifacts: false
+      environment: "production"
