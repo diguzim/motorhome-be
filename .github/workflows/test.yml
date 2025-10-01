@@ -3,7 +3,7 @@ name: Local Test
 on:
   workflow_dispatch:
   push:
-    branches: [feature/*, develop]
+    branches: [feature/*]
 
 jobs:
   quick-test:
