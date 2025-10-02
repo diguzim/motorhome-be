@@ -17,9 +17,9 @@ on:
           - "production"
 
 jobs:
-  # Development Build - for develop branch and PRs
+  # Development Build - only when manually triggered
   development-build:
-    if: github.ref == 'refs/heads/develop' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'development')
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'development'
     runs-on: ubuntu-latest
     environment: preview
 
@@ -47,7 +47,12 @@ jobs:
 
       - name: Build development Docker image
         run: |
-          echo "� Building development Docker image..."
+          echo "🐳 Building development Docker image..."
+          # Create package-lock.json if it doesn't exist
+          if [ ! -f package-lock.json ]; then
+            echo "📝 Generating package-lock.json..."
+            npm install --package-lock-only
+          fi
           docker build -t motorhome-be:dev-${{ github.sha }} .
           echo "✅ Development build completed"
 
