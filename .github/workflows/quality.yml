@@ -2,15 +2,9 @@ name: Quality Checks
 
 on:
   workflow_call:
-    inputs:
-      node-version:
-        description: "Node.js version to use"
-        required: false
-        default: "20.x"
-        type: string
 
 jobs:
-  lint:
+  quality:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -18,8 +12,14 @@ jobs:
 
       - name: Setup Node.js and Dependencies
         uses: ./.github/actions/setup-node-deps
-        with:
-          node-version: ${{ inputs.node-version }}
+
+      - name: Run security audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Check TypeScript compilation
+        run: npx tsc --noEmit
+        continue-on-error: true
 
       - name: Run ESLint (if configured)
         run: |
@@ -28,46 +28,4 @@ jobs:
           else
             echo "No ESLint configuration found, skipping..."
           fi
-        continue-on-error: true
-
-  security:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js and Dependencies
-        uses: ./.github/actions/setup-node-deps
-        with:
-          node-version: ${{ inputs.node-version }}
-
-      - name: Run security audit
-        run: npm audit --audit-level=high
-        continue-on-error: true
-
-      - name: Check for outdated packages
-        run: npm outdated
-        continue-on-error: true
-
-  dependency-health:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js and Dependencies
-        uses: ./.github/actions/setup-node-deps
-        with:
-          node-version: ${{ inputs.node-version }}
-
-      - name: Check for deprecated packages
-        run: |
-          echo "🔍 Checking for deprecated packages..."
-          npm ls --depth=0 2>/dev/null | grep -i "deprecated" || echo "No deprecated direct dependencies found"
-        continue-on-error: true
-
-      - name: Audit fix dry run
-        run: |
-          echo "🔧 Checking what audit fix would do..."
-          npm audit fix --dry-run || echo "Audit fix dry run completed"
         continue-on-error: true

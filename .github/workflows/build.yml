@@ -1,22 +1,12 @@
-name: Build Workflow
+name: Reusable Build Workflow
 
 on:
   workflow_call:
     inputs:
-      node-version:
-        description: "Node.js version to use"
-        required: false
-        default: "20.x"
-        type: string
-      cache-artifacts:
-        description: "Whether to cache build artifacts"
-        required: false
-        default: true
-        type: boolean
       environment:
         description: "Environment to build for"
         required: false
-        default: "production"
+        default: "development"
         type: string
     outputs:
       build-success:
@@ -35,8 +25,6 @@ jobs:
 
       - name: Setup Node.js and Dependencies
         uses: ./.github/actions/setup-node-deps
-        with:
-          node-version: ${{ inputs.node-version }}
 
       - name: Build project
         id: build
@@ -46,15 +34,3 @@ jobs:
 
       - name: Check TypeScript compilation
         run: npx tsc --noEmit
-
-      - name: Cache build artifacts
-        if: ${{ inputs.cache-artifacts }}
-        uses: actions/cache@v3
-        with:
-          path: |
-            build/
-            .strapi/
-          key: ${{ runner.os }}-build-${{ hashFiles('**/package-lock.json') }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-build-${{ hashFiles('**/package-lock.json') }}-
-            ${{ runner.os }}-build-

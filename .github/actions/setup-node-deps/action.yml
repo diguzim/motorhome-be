@@ -5,7 +5,7 @@ inputs:
   node-version:
     description: 'Node.js version to use'
     required: false
-    default: '20.x'
+    default: '22.x'
   cache-dependency-path:
     description: 'Path to cache dependencies'
     required: false

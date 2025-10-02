@@ -1,7 +1,6 @@
-name: Local Test
+name: Feature Branch Test
 
 on:
-  workflow_dispatch:
   push:
     branches: [feature/*]
 
@@ -14,8 +13,6 @@ jobs:
 
       - name: Setup Node.js and Dependencies
         uses: ./.github/actions/setup-node-deps
-        with:
-          node-version: "20.x"
 
       - name: Quick build test
         run: npm run build
@@ -25,8 +22,13 @@ jobs:
       - name: TypeScript check
         run: npx tsc --noEmit
 
+      - name: Security audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
       - name: Test summary
         run: |
-          echo "✅ Quick test completed successfully!"
+          echo "✅ Feature branch test completed!"
           echo "📦 Build: OK"
           echo "🔍 TypeScript: OK"
+          echo "🔒 Security: Checked"

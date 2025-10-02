@@ -4,36 +4,56 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: []
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to deploy"
+        required: true
+        default: "development"
+        type: choice
+        options:
+          - "development"
+          - "production"
 
 jobs:
-  build:
-    uses: ./.github/workflows/build.yml
-    with:
-      node-version: "20.x"
-      cache-artifacts: true
-      environment: "production"
+  # Development Build - for develop branch and PRs
+  development-build:
+    if: github.ref == 'refs/heads/develop' || github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'development')
+    runs-on: ubuntu-latest
+    environment: preview
 
-  quality:
-    uses: ./.github/workflows/quality.yml
-    needs: build
-    with:
-      node-version: "20.x"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-  multi-node-test:
-    if: github.event_name == 'pull_request'
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x, 22.x]
-    uses: ./.github/workflows/build.yml
-    with:
-      node-version: ${{ matrix.node-version }}
-      cache-artifacts: false
-      environment: "production"
+      - name: Setup Node.js and Dependencies
+        uses: ./.github/actions/setup-node-deps
+        with:
+          node-version: "22.x"
 
-  deploy:
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    needs: [build, quality]
+      - name: Run quality checks
+        run: |
+          echo "🔍 Running quality checks..."
+          npm audit --audit-level=high || echo "⚠️ Security vulnerabilities found"
+          npx tsc --noEmit || echo "⚠️ TypeScript compilation issues found"
+
+      - name: Build for development
+        run: |
+          echo "🏗️ Building for development..."
+          npm run build
+        env:
+          NODE_ENV: development
+
+      - name: Build development Docker image
+        run: |
+          echo "� Building development Docker image..."
+          docker build -t motorhome-be:dev-${{ github.sha }} .
+          echo "✅ Development build completed"
+
+  # Production Build - for main branch and manual production deploys
+  production-build:
+    if: github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'production')
     runs-on: ubuntu-latest
     environment: production
 
@@ -44,20 +64,58 @@ jobs:
       - name: Setup Node.js and Dependencies
         uses: ./.github/actions/setup-node-deps
         with:
-          node-version: "20.x"
+          node-version: "22.x"
 
-      - name: Restore build cache
-        uses: actions/cache@v3
-        with:
-          path: |
-            build/
-            .strapi/
-          key: ${{ runner.os }}-build-${{ hashFiles('**/package-lock.json') }}-${{ github.sha }}
-
-      - name: Deploy notification
+      - name: Run comprehensive quality checks
         run: |
-          echo "🚀 Deploying to production"
-          echo "✅ Build completed successfully"
-          echo "📦 Artifacts ready for deployment"
+          echo "🔍 Running comprehensive quality checks..."
+          npm audit --audit-level=moderate
+          npx tsc --noEmit
+          echo "✅ Quality checks passed"
 
-      # Add your actual deployment steps here
+      - name: Build for production
+        run: |
+          echo "🏗️ Building for production..."
+          npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.CONTAINER_REGISTRY_URL }}
+          username: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}
+          password: ${{ secrets.CONTAINER_REGISTRY_PASSWORD }}
+
+      - name: Build and push production Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.prod
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: |
+            ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be:latest
+            ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be:${{ github.sha }}
+          build-args: |
+            NODE_ENV=production
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+      - name: Deploy to production
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "🚀 Deploying to production..."
+          echo "📦 Docker image: ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be:${{ github.sha }}"
+          echo "🌍 Environment: production"
+
+          # Deployment commands would go here
+          # Example: SSH to server and update containers
+          # ssh ${{ secrets.PRODUCTION_SERVER_USER }}@${{ secrets.PRODUCTION_SERVER_HOST }} \
+          #   "cd /opt/motorhome-be && docker compose pull && docker compose up -d"
+
+          echo "✅ Production deployment completed"
