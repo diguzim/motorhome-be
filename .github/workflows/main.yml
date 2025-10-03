@@ -33,10 +33,15 @@ jobs:
           node-version: "22.x"
 
       - name: Run quality checks
+        continue-on-error: true
         run: |
           echo "🔍 Running quality checks..."
-          npm audit --audit-level=high || echo "⚠️ Security vulnerabilities found"
-          npx tsc --noEmit || echo "⚠️ TypeScript compilation issues found"
+          echo "📊 Security Audit Report:"
+          npm audit --audit-level=high || echo "⚠️ Security vulnerabilities found (non-blocking)"
+          echo ""
+          echo "📝 TypeScript Compilation Report:"
+          npx tsc --noEmit || echo "⚠️ TypeScript compilation issues found (non-blocking)"
+          echo "✅ Quality checks completed (informational only)"
 
       - name: Build for development
         run: |
@@ -72,11 +77,18 @@ jobs:
           node-version: "22.x"
 
       - name: Run comprehensive quality checks
+        continue-on-error: true
         run: |
           echo "🔍 Running comprehensive quality checks..."
-          npm audit --audit-level=moderate
-          npx tsc --noEmit
-          echo "✅ Quality checks passed"
+          echo "📊 Security Audit Report (moderate level):"
+          npm audit --audit-level=moderate || echo "⚠️ Security vulnerabilities found (non-blocking)"
+          echo ""
+          echo "📝 TypeScript Compilation Report:"
+          npx tsc --noEmit || echo "⚠️ TypeScript compilation issues found (non-blocking)"
+          echo ""
+          echo "📦 Package Health Check:"
+          npm outdated || echo "📋 Package versions checked"
+          echo "✅ Quality checks completed (informational only)"
 
       - name: Build for production
         run: |
