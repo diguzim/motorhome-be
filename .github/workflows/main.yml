@@ -124,3 +124,29 @@ jobs:
           #   "cd /opt/motorhome-be && docker compose pull && docker compose up -d"
 
           echo "✅ Production deployment completed"
+
+      - name: Test VPS connection
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "🔐 Setting up SSH connection to VPS..."
+
+          # Create SSH directory and set up key
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+
+          # Add VPS to known hosts to avoid host verification prompt
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+          echo "📝 Creating hello.txt file on VPS..."
+
+          # Connect to VPS and create hello.txt in /root
+          ssh -i ~/.ssh/vps_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
+            echo "Hello from GitHub Actions!" > /root/hello.txt
+            echo "Deployment test successful at $(date)" >> /root/hello.txt
+            echo "Docker image: ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be:${{ github.sha }}" >> /root/hello.txt
+            ls -la /root/hello.txt
+            cat /root/hello.txt
+          EOF
+
+          echo "✅ VPS connection test completed successfully!"
