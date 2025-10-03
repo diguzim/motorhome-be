@@ -50,6 +50,36 @@ jobs:
         env:
           NODE_ENV: development
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.CONTAINER_REGISTRY_URL }}
+          username: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}
+          password: ${{ secrets.CONTAINER_REGISTRY_PASSWORD }}
+
+      - name: Test registry connection
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "🧪 Testing registry connection..."
+
+          # GitHub Container Registry format
+          TEST_REPO="${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be-test"
+
+          # Test registry push capability
+          docker pull alpine:latest > /dev/null 2>&1
+          docker tag alpine:latest "$TEST_REPO:${{ github.run_id }}"
+
+          if docker push "$TEST_REPO:${{ github.run_id }}" > /dev/null 2>&1; then
+            echo "✅ Registry connection verified"
+            docker image rm "$TEST_REPO:${{ github.run_id }}" > /dev/null 2>&1 || true
+          else
+            echo "⚠️ Registry test failed - proceeding with main build"
+          fi
+
       - name: Build development Docker image
         run: |
           echo "🐳 Building development Docker image..."
@@ -60,6 +90,55 @@ jobs:
           fi
           docker build -t motorhome-be:dev-${{ github.sha }} .
           echo "✅ Development build completed"
+
+      - name: Push development Docker image
+        if: github.event_name != 'pull_request'
+        run: |
+          # GitHub Container Registry format
+          REPO_NAME="${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
+
+          # Tag and push development image
+          docker tag motorhome-be:dev-${{ github.sha }} "$REPO_NAME:dev-${{ github.sha }}"
+          docker tag motorhome-be:dev-${{ github.sha }} "$REPO_NAME:dev-latest"
+
+          docker push "$REPO_NAME:dev-${{ github.sha }}"
+          docker push "$REPO_NAME:dev-latest"
+
+          echo "✅ Development image pushed: $REPO_NAME:dev-${{ github.sha }}"
+
+      - name: Test VPS connection and prepare deployment
+        run: |
+          echo "🔐 Testing VPS connection..."
+
+          # Set up SSH
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
+          chmod 600 ~/.ssh/vps_key
+          ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
+
+          # GitHub Container Registry format
+          REPO_NAME="${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
+
+          # Test VPS connection and create deployment info
+          ssh -i ~/.ssh/vps_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << EOF
+            echo "VPS connection successful at \$(date)" > /tmp/deployment-info-dev.txt
+            echo "Environment: Development" >> /tmp/deployment-info-dev.txt
+            echo "Commit SHA: ${{ github.sha }}" >> /tmp/deployment-info-dev.txt
+            echo "Docker image: $REPO_NAME:dev-${{ github.sha }}" >> /tmp/deployment-info-dev.txt
+            echo "Deployment ready: \$(date)" >> /tmp/deployment-info-dev.txt
+            
+            # Test Docker availability
+            if command -v docker &> /dev/null; then
+              echo "Docker: Available" >> /tmp/deployment-info-dev.txt
+              docker --version >> /tmp/deployment-info-dev.txt
+            else
+              echo "Docker: Not installed" >> /tmp/deployment-info-dev.txt
+            fi
+            
+            cat /tmp/deployment-info-dev.txt
+          EOF
+
+          echo "✅ VPS connection verified and development deployment info created"
 
   # Production Build - for main branch and manual production deploys
   production-build:
@@ -100,33 +179,6 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Debug registry configuration
-        if: github.event_name != 'pull_request'
-        run: |
-          echo "🔍 Registry URL: ${{ secrets.CONTAINER_REGISTRY_URL }}"
-          echo "🔍 Username: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
-          echo "🔍 Registry URL length: ${#CONTAINER_REGISTRY_URL}"
-          echo "🔍 Full repository path would be: ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be"
-
-          # Detect registry type and suggest proper format
-          if [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"docker.io"* ]] || [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == "" ]]; then
-            echo "📋 Detected: Docker Hub - format should be: username/repository"
-            echo "💡 Suggested: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
-          elif [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"ghcr.io"* ]]; then
-            echo "📋 Detected: GitHub Container Registry - format should be: ghcr.io/username/repository"
-            echo "💡 Suggested: ${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
-          elif [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"gcr.io"* ]]; then
-            echo "📋 Detected: Google Container Registry - format should be: gcr.io/project-id/repository"
-          elif [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"azurecr.io"* ]]; then
-            echo "📋 Detected: Azure Container Registry - format should be: registry.azurecr.io/repository"
-          elif [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"amazonaws.com"* ]]; then
-            echo "📋 Detected: AWS ECR - format should be: account.dkr.ecr.region.amazonaws.com/repository"
-          else
-            echo "📋 Custom registry detected"
-          fi
-        env:
-          CONTAINER_REGISTRY_URL: ${{ secrets.CONTAINER_REGISTRY_URL }}
-
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -140,64 +192,26 @@ jobs:
         run: |
           echo "🧪 Testing registry connection..."
 
-          # Determine the correct repository format based on registry type
-          REGISTRY_URL="${{ secrets.CONTAINER_REGISTRY_URL }}"
-          USERNAME="${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
+          # GitHub Container Registry format
+          TEST_REPO="${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be-test"
 
-          if [[ "$REGISTRY_URL" == *"docker.io"* ]] || [[ "$REGISTRY_URL" == "" ]]; then
-            # Docker Hub format: username/repository
-            TEST_REPO="$USERNAME/motorhome-be-test"
-            MAIN_REPO="$USERNAME/motorhome-be"
-          elif [[ "$REGISTRY_URL" == *"ghcr.io"* ]]; then
-            # GitHub Container Registry format: ghcr.io/username/repository
-            TEST_REPO="$REGISTRY_URL/$USERNAME/motorhome-be-test"
-            MAIN_REPO="$REGISTRY_URL/$USERNAME/motorhome-be"
-          else
-            # Other registries: registry.com/repository
-            TEST_REPO="$REGISTRY_URL/motorhome-be-test"
-            MAIN_REPO="$REGISTRY_URL/motorhome-be"
-          fi
-
-          echo "🔍 Test repository: $TEST_REPO"
-          echo "🔍 Main repository: $MAIN_REPO"
-
-          # Try to pull a small image to test the connection
-          docker pull alpine:latest
+          # Test registry push capability
+          docker pull alpine:latest > /dev/null 2>&1
           docker tag alpine:latest "$TEST_REPO:${{ github.run_id }}"
 
-          # Try pushing a test image (and clean up)
-          echo "🔄 Testing push capability..."
-          if docker push "$TEST_REPO:${{ github.run_id }}"; then
-            echo "✅ Registry push test successful"
-            # Clean up test image if possible
-            docker image rm "$TEST_REPO:${{ github.run_id }}" || true
+          if docker push "$TEST_REPO:${{ github.run_id }}" > /dev/null 2>&1; then
+            echo "✅ Registry connection verified"
+            docker image rm "$TEST_REPO:${{ github.run_id }}" > /dev/null 2>&1 || true
           else
-            echo "❌ Registry push test failed"
-            echo "💡 You may need to create the repository '$MAIN_REPO' in your registry first"
-            echo "💡 Or check if the registry URL and credentials are correct"
-            # Don't exit 1 here, let's try the main build anyway
+            echo "⚠️ Registry test failed - proceeding with main build"
           fi
 
       - name: Build and push production Docker image
         if: github.event_name != 'pull_request'
         run: |
-          REGISTRY_URL="${{ secrets.CONTAINER_REGISTRY_URL }}"
-          USERNAME="${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
+          # GitHub Container Registry format
+          REPO_NAME="${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
 
-          if [[ "$REGISTRY_URL" == *"docker.io"* ]] || [[ "$REGISTRY_URL" == "" ]]; then
-            # Docker Hub format: username/repository
-            REPO_NAME="$USERNAME/motorhome-be"
-          elif [[ "$REGISTRY_URL" == *"ghcr.io"* ]]; then
-            # GitHub Container Registry format: ghcr.io/username/repository
-            REPO_NAME="$REGISTRY_URL/$USERNAME/motorhome-be"
-          else
-            # Other registries: registry.com/repository  
-            REPO_NAME="$REGISTRY_URL/motorhome-be"
-          fi
-
-          echo "🏷️ Repository name: $REPO_NAME"
-
-          # Use docker buildx directly with the correct repository name
           docker buildx build \
             --platform linux/amd64,linux/arm64 \
             --build-arg NODE_ENV=production \
@@ -210,20 +224,10 @@ jobs:
             .
 
       - name: Deploy to production
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           echo "🚀 Deploying to production..."
-          # Determine the correct repository name format
-          REGISTRY_URL="${{ secrets.CONTAINER_REGISTRY_URL }}"
-          USERNAME="${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
 
-          if [[ "$REGISTRY_URL" == *"docker.io"* ]] || [[ "$REGISTRY_URL" == "" ]]; then
-            REPO_NAME="$USERNAME/motorhome-be"
-          elif [[ "$REGISTRY_URL" == *"ghcr.io"* ]]; then
-            REPO_NAME="$REGISTRY_URL/$USERNAME/motorhome-be"
-          else
-            REPO_NAME="$REGISTRY_URL/motorhome-be"
-          fi
+          REPO_NAME="${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
 
           echo "📦 Docker image: $REPO_NAME:${{ github.sha }}"
           echo "🌍 Environment: production"
@@ -235,40 +239,35 @@ jobs:
 
           echo "✅ Production deployment completed"
 
-      - name: Test VPS connection
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      - name: Test VPS connection and prepare deployment
         run: |
-          echo "🔐 Setting up SSH connection to VPS..."
+          echo "🔐 Testing VPS connection..."
 
-          # Create SSH directory and set up key
+          # Set up SSH
           mkdir -p ~/.ssh
           echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/vps_key
           chmod 600 ~/.ssh/vps_key
-
-          # Add VPS to known hosts to avoid host verification prompt
           ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
 
-          echo "📝 Creating hello.txt file on VPS..."
+          # GitHub Container Registry format
+          REPO_NAME="${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
 
-          # Connect to VPS and create hello.txt in /root
-          ssh -i ~/.ssh/vps_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
-            echo "Hello from GitHub Actions!" > /root/hello.txt
-            echo "Deployment test successful at $(date)" >> /root/hello.txt
-            # Determine the correct repository name format
-            REGISTRY_URL="${{ secrets.CONTAINER_REGISTRY_URL }}"
-            USERNAME="${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
+          # Test VPS connection and create deployment info
+          ssh -i ~/.ssh/vps_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << EOF
+            echo "VPS connection successful at \$(date)" > /tmp/deployment-info.txt
+            echo "Commit SHA: ${{ github.sha }}" >> /tmp/deployment-info.txt
+            echo "Docker image: $REPO_NAME:${{ github.sha }}" >> /tmp/deployment-info.txt
+            echo "Deployment ready: \$(date)" >> /tmp/deployment-info.txt
             
-            if [[ "$REGISTRY_URL" == *"docker.io"* ]] || [[ "$REGISTRY_URL" == "" ]]; then
-              REPO_NAME="$USERNAME/motorhome-be"
-            elif [[ "$REGISTRY_URL" == *"ghcr.io"* ]]; then
-              REPO_NAME="$REGISTRY_URL/$USERNAME/motorhome-be"
+            # Test Docker availability
+            if command -v docker &> /dev/null; then
+              echo "Docker: Available" >> /tmp/deployment-info.txt
+              docker --version >> /tmp/deployment-info.txt
             else
-              REPO_NAME="$REGISTRY_URL/motorhome-be"
+              echo "Docker: Not installed" >> /tmp/deployment-info.txt
             fi
             
-            echo "Docker image: $REPO_NAME:${{ github.sha }}" >> /root/hello.txt
-            ls -la /root/hello.txt
-            cat /root/hello.txt
+            cat /tmp/deployment-info.txt
           EOF
 
-          echo "✅ VPS connection test completed successfully!"
+          echo "✅ VPS connection verified and deployment info created"
