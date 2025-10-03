@@ -100,6 +100,33 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Debug registry configuration
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "🔍 Registry URL: ${{ secrets.CONTAINER_REGISTRY_URL }}"
+          echo "🔍 Username: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
+          echo "🔍 Registry URL length: ${#CONTAINER_REGISTRY_URL}"
+          echo "🔍 Full repository path would be: ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be"
+
+          # Detect registry type and suggest proper format
+          if [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"docker.io"* ]] || [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == "" ]]; then
+            echo "📋 Detected: Docker Hub - format should be: username/repository"
+            echo "💡 Suggested: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
+          elif [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"ghcr.io"* ]]; then
+            echo "📋 Detected: GitHub Container Registry - format should be: ghcr.io/username/repository"
+            echo "💡 Suggested: ${{ secrets.CONTAINER_REGISTRY_URL }}/${{ secrets.CONTAINER_REGISTRY_USERNAME }}/motorhome-be"
+          elif [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"gcr.io"* ]]; then
+            echo "📋 Detected: Google Container Registry - format should be: gcr.io/project-id/repository"
+          elif [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"azurecr.io"* ]]; then
+            echo "📋 Detected: Azure Container Registry - format should be: registry.azurecr.io/repository"
+          elif [[ "${{ secrets.CONTAINER_REGISTRY_URL }}" == *"amazonaws.com"* ]]; then
+            echo "📋 Detected: AWS ECR - format should be: account.dkr.ecr.region.amazonaws.com/repository"
+          else
+            echo "📋 Custom registry detected"
+          fi
+        env:
+          CONTAINER_REGISTRY_URL: ${{ secrets.CONTAINER_REGISTRY_URL }}
+
       - name: Log in to Container Registry
         if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
@@ -108,26 +135,97 @@ jobs:
           username: ${{ secrets.CONTAINER_REGISTRY_USERNAME }}
           password: ${{ secrets.CONTAINER_REGISTRY_PASSWORD }}
 
+      - name: Test registry connection
+        if: github.event_name != 'pull_request'
+        run: |
+          echo "🧪 Testing registry connection..."
+
+          # Determine the correct repository format based on registry type
+          REGISTRY_URL="${{ secrets.CONTAINER_REGISTRY_URL }}"
+          USERNAME="${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
+
+          if [[ "$REGISTRY_URL" == *"docker.io"* ]] || [[ "$REGISTRY_URL" == "" ]]; then
+            # Docker Hub format: username/repository
+            TEST_REPO="$USERNAME/motorhome-be-test"
+            MAIN_REPO="$USERNAME/motorhome-be"
+          elif [[ "$REGISTRY_URL" == *"ghcr.io"* ]]; then
+            # GitHub Container Registry format: ghcr.io/username/repository
+            TEST_REPO="$REGISTRY_URL/$USERNAME/motorhome-be-test"
+            MAIN_REPO="$REGISTRY_URL/$USERNAME/motorhome-be"
+          else
+            # Other registries: registry.com/repository
+            TEST_REPO="$REGISTRY_URL/motorhome-be-test"
+            MAIN_REPO="$REGISTRY_URL/motorhome-be"
+          fi
+
+          echo "🔍 Test repository: $TEST_REPO"
+          echo "🔍 Main repository: $MAIN_REPO"
+
+          # Try to pull a small image to test the connection
+          docker pull alpine:latest
+          docker tag alpine:latest "$TEST_REPO:${{ github.run_id }}"
+
+          # Try pushing a test image (and clean up)
+          echo "🔄 Testing push capability..."
+          if docker push "$TEST_REPO:${{ github.run_id }}"; then
+            echo "✅ Registry push test successful"
+            # Clean up test image if possible
+            docker image rm "$TEST_REPO:${{ github.run_id }}" || true
+          else
+            echo "❌ Registry push test failed"
+            echo "💡 You may need to create the repository '$MAIN_REPO' in your registry first"
+            echo "💡 Or check if the registry URL and credentials are correct"
+            # Don't exit 1 here, let's try the main build anyway
+          fi
+
       - name: Build and push production Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile.prod
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be:latest
-            ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be:${{ github.sha }}
-          build-args: |
-            NODE_ENV=production
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          platforms: linux/amd64,linux/arm64
+        if: github.event_name != 'pull_request'
+        run: |
+          REGISTRY_URL="${{ secrets.CONTAINER_REGISTRY_URL }}"
+          USERNAME="${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
+
+          if [[ "$REGISTRY_URL" == *"docker.io"* ]] || [[ "$REGISTRY_URL" == "" ]]; then
+            # Docker Hub format: username/repository
+            REPO_NAME="$USERNAME/motorhome-be"
+          elif [[ "$REGISTRY_URL" == *"ghcr.io"* ]]; then
+            # GitHub Container Registry format: ghcr.io/username/repository
+            REPO_NAME="$REGISTRY_URL/$USERNAME/motorhome-be"
+          else
+            # Other registries: registry.com/repository  
+            REPO_NAME="$REGISTRY_URL/motorhome-be"
+          fi
+
+          echo "🏷️ Repository name: $REPO_NAME"
+
+          # Use docker buildx directly with the correct repository name
+          docker buildx build \
+            --platform linux/amd64,linux/arm64 \
+            --build-arg NODE_ENV=production \
+            --cache-from type=gha \
+            --cache-to type=gha,mode=max \
+            --file ./Dockerfile.prod \
+            --tag "$REPO_NAME:latest" \
+            --tag "$REPO_NAME:${{ github.sha }}" \
+            --push \
+            .
 
       - name: Deploy to production
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           echo "🚀 Deploying to production..."
-          echo "📦 Docker image: ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be:${{ github.sha }}"
+          # Determine the correct repository name format
+          REGISTRY_URL="${{ secrets.CONTAINER_REGISTRY_URL }}"
+          USERNAME="${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
+
+          if [[ "$REGISTRY_URL" == *"docker.io"* ]] || [[ "$REGISTRY_URL" == "" ]]; then
+            REPO_NAME="$USERNAME/motorhome-be"
+          elif [[ "$REGISTRY_URL" == *"ghcr.io"* ]]; then
+            REPO_NAME="$REGISTRY_URL/$USERNAME/motorhome-be"
+          else
+            REPO_NAME="$REGISTRY_URL/motorhome-be"
+          fi
+
+          echo "📦 Docker image: $REPO_NAME:${{ github.sha }}"
           echo "🌍 Environment: production"
 
           # Deployment commands would go here
@@ -156,7 +254,19 @@ jobs:
           ssh -i ~/.ssh/vps_key ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} << 'EOF'
             echo "Hello from GitHub Actions!" > /root/hello.txt
             echo "Deployment test successful at $(date)" >> /root/hello.txt
-            echo "Docker image: ${{ secrets.CONTAINER_REGISTRY_URL }}/motorhome-be:${{ github.sha }}" >> /root/hello.txt
+            # Determine the correct repository name format
+            REGISTRY_URL="${{ secrets.CONTAINER_REGISTRY_URL }}"
+            USERNAME="${{ secrets.CONTAINER_REGISTRY_USERNAME }}"
+            
+            if [[ "$REGISTRY_URL" == *"docker.io"* ]] || [[ "$REGISTRY_URL" == "" ]]; then
+              REPO_NAME="$USERNAME/motorhome-be"
+            elif [[ "$REGISTRY_URL" == *"ghcr.io"* ]]; then
+              REPO_NAME="$REGISTRY_URL/$USERNAME/motorhome-be"
+            else
+              REPO_NAME="$REGISTRY_URL/motorhome-be"
+            fi
+            
+            echo "Docker image: $REPO_NAME:${{ github.sha }}" >> /root/hello.txt
             ls -la /root/hello.txt
             cat /root/hello.txt
           EOF
